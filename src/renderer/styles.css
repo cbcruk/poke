@@ -17,6 +17,10 @@ header { display: flex; align-items: center; gap: 6px; min-height: 24px; }
   border: 1px solid transparent; cursor: pointer; font-size: 11px; white-space: nowrap;
 }
 .tab.active { background: #263041; color: #dde1e7; border-color: #3d7dff; }
+.tab-name {
+  padding: 3px 9px; border-radius: 5px; background: #15171c; color: #dde1e7;
+  border: 1px solid #3d7dff; font: inherit; font-size: 11px; width: 12ch; outline: none;
+}
 #add {
   width: 24px; height: 24px; border: 1px solid #2b303a; background: #1d212a;
   color: #9aa3b2; border-radius: 5px; cursor: pointer; font-size: 14px; line-height: 1;
