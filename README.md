@@ -38,6 +38,7 @@ Ctrl+Enter 또는 Run 버튼으로 버퍼를 실행한다.
 | `roles()` | 페이지에 실제로 있는 role 목록 |
 | `url()` / `title()` / `evaluate(code)` | 페이지 상태 |
 | `expect(v)` | vitest 매처 전체 (`toEqual` `toStrictEqual` `toMatchObject` `toContain` `toHaveProperty` `toBeCloseTo` …) |
+| `acceptNextDialog()` | 다음 대화상자 하나를 수락 (기본은 `confirm` 거절, `alert` 닫기) |
 | `sleep(ms)` / `log(...)` | 보조 |
 
 `require`도 주입되어 있다. 메인 프로세스라 Node 전체가 열려 있고 MV3 CSP가 없다.
@@ -90,6 +91,19 @@ testing-library 는 DOM 안에서 돌아야 하는데, 남의 앱 페이지에 1
 
 `describe`와 `it`은 없다. 매처 호출마다 로그에 체크 표시가 한 줄씩 남고,
 실패한 지점에서 실행이 멈춘다.
+
+### 대화상자
+
+Electron 은 `confirm()` 을 아무것도 띄우지 않고 수락해 버린다. 그대로 두면 "정말
+삭제할까요?"가 확인 없이 지나간다. 그래서 poke 가 CDP 로 먼저 받아 `confirm` 은 거절하고
+`alert` 는 닫은 뒤 로그에 남긴다. 수락하려면 그 동작 앞에 `acceptNextDialog()` 를 둔다.
+한 번만 듣고, 실행이 끝나면 사라진다.
+
+```
+  · confirm("정말 삭제할까요?") → dismissed
+```
+
+`prompt()` 는 Electron 이 지원하지 않아 페이지에서 바로 실패한다.
 
 ## 버퍼
 

@@ -13,10 +13,28 @@ const DEADLINE_MS = 5000
 
 const MISSING = '__pokeMissing'
 
-interface ContextEvent {
+interface PageEvent {
   context?: { id: number; name: string; auxData?: { frameId?: string } }
   executionContextId?: number
   frame?: { id: string; parentId?: string }
+  type?: Dialog['type']
+  message?: string
+}
+
+/**
+ * A JavaScript dialog the page opened.
+ *
+ * Electron does not support `prompt()`: it throws in the page and never
+ * reaches here.
+ */
+export interface Dialog {
+  type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'
+  message: string
+}
+
+/** How to close a {@linkcode Dialog}. */
+export interface DialogAnswer {
+  accept: boolean
 }
 
 /**
@@ -36,6 +54,12 @@ export class World {
   private pending: { method: string; since: number } | null = null
   private readonly bundle: string
 
+  /**
+   * Decides how each dialog is closed. Without an answer the page would hold
+   * whatever the embedder chose, which in Electron is to accept silently.
+   */
+  onDialog: (dialog: Dialog) => DialogAnswer = (d) => ({ accept: d.type !== 'confirm' })
+
   constructor(private readonly getWc: () => WebContents) {
     this.bundle = fs.readFileSync(path.join(__dirname, '../page/queries.js'), 'utf8')
   }
@@ -43,6 +67,15 @@ export class World {
   detach(): void {
     const wc = this.getWc()
     if (wc.debugger.isAttached()) wc.debugger.detach()
+  }
+
+  /** Attaches the debugger, so dialogs are answered from the first action on. */
+  async ready(): Promise<void> {
+    this.attaching ??= this.attach().catch((err) => {
+      this.attaching = null
+      throw err
+    })
+    await this.attaching
   }
 
   async call<T>(method: string, ...args: unknown[]): Promise<T> {
@@ -74,11 +107,7 @@ export class World {
   }
 
   private async ensure(): Promise<number> {
-    this.attaching ??= this.attach().catch((err) => {
-      this.attaching = null
-      throw err
-    })
-    await this.attaching
+    await this.ready()
     if (this.contextId !== null) return this.contextId
 
     // The document predates the script registration, or its world has not
@@ -94,7 +123,7 @@ export class World {
   private async attach(): Promise<void> {
     const wc = this.getWc()
     if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
-    wc.debugger.on('message', (_e, method, params) => this.onEvent(method, params as ContextEvent))
+    wc.debugger.on('message', (_e, method, params) => this.onEvent(method, params as PageEvent))
     wc.debugger.on('detach', () => {
       this.attaching = null
       this.contextId = null
@@ -113,7 +142,7 @@ export class World {
     })
   }
 
-  private onEvent(method: string, params: ContextEvent): void {
+  private onEvent(method: string, params: PageEvent): void {
     switch (method) {
       case 'Runtime.executionContextCreated': {
         const ctx = params.context
@@ -135,6 +164,18 @@ export class World {
       case 'Page.frameNavigated':
         if (params.frame && !params.frame.parentId) this.mainFrameId = params.frame.id
         break
+      case 'Page.javascriptDialogOpening': {
+        const answer = this.onDialog({
+          type: params.type ?? 'alert',
+          message: params.message ?? '',
+        })
+        // Bypasses the pending gate: a query stuck behind this dialog is
+        // exactly what the answer releases.
+        void this.getWc()
+          .debugger.sendCommand('Page.handleJavaScriptDialog', answer)
+          .catch(() => {})
+        break
+      }
     }
   }
 

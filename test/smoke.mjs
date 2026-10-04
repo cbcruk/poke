@@ -321,6 +321,35 @@ check('키 입력은 전부 신뢰됨', /untrusted/.test(logKeys), false)
 const logBadKey = await runCode(`await press('Ctrl+Foo')`)
 check('모르는 키는 이유를 말하며 실패', /press\("Ctrl\+Foo"\): unknown key "Foo"/.test(logBadKey), true)
 
+// ---- 2g2. 대화상자 ----
+// Electron 은 confirm() 을 말없이 수락한다. 답하지 않으면 확인 창 없이 삭제가 진행된다.
+const logDialog = await runCode(`
+await goto('${site}/dialogs.html')
+await click('#del')
+log('기본:', await text('#out'))
+acceptNextDialog()
+await click('#del')
+log('수락:', await text('#out'))
+await click('#del')
+log('일회성:', await text('#out'))
+acceptNextDialog()
+await click('#note')
+log('alert:', await text('#out'))
+await click('#del')
+log('alert 가 수락을 소비:', await text('#out'))
+`)
+check('confirm 은 기본으로 닫힘', /기본: 취소됨/.test(logDialog), true)
+check('acceptNextDialog 로 수락', /수락: 삭제됨/.test(logDialog), true)
+check('수락은 한 번만', /일회성: 취소됨/.test(logDialog), true)
+check('대화상자를 로그에 남김', /confirm\("정말 삭제할까요\?"\) → dismissed/.test(logDialog), true)
+check('alert 는 닫히고 이어서 실행', /alert: 알림 닫힘/.test(logDialog), true)
+check('alert 도 로그에 남김', /alert\("저장했습니다"\) → accepted/.test(logDialog), true)
+check('걸어둔 수락은 다음 대화상자가 가져감', /alert 가 수락을 소비: 취소됨/.test(logDialog), true)
+
+await runCode(`acceptNextDialog()`)
+const logNextRun = await runCode(`await click('#del')\nlog('다음 실행:', await text('#out'))`)
+check('걸어둔 수락은 다음 실행으로 새지 않음', /다음 실행: 취소됨/.test(logNextRun), true)
+
 // ---- 2h. 응답하지 않는 페이지 ----
 // 메인 스레드가 막히면 CDP 평가가 돌아오지 않는다. 버퍼가 말없이 멈추면 안 된다.
 const logBusy = await runCode(`

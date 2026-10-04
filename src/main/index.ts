@@ -44,7 +44,7 @@ app.whenReady().then(() => {
   layout()
   win.on('resize', layout)
 
-  const { api, onDidFinishLoad, onDidNavigateInPage } = createApi(wc, emit)
+  const { api, prepare, onDidFinishLoad, onDidNavigateInPage } = createApi(wc, emit)
 
   view.webContents.loadURL('about:blank')
   view.webContents.on('did-finish-load', onDidFinishLoad)
@@ -56,6 +56,7 @@ app.whenReady().then(() => {
   view.webContents.on('did-navigate-in-page', sendUrl)
 
   ipcMain.handle('run', async (_e, code: string): Promise<RunResult> => {
+    await prepare()
     const result = await runBuffer(code, api)
     // The final line is emitted here rather than in the renderer so it cannot
     // overtake assertion lines still in flight on the log channel.
