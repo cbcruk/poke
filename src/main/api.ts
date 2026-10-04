@@ -1,5 +1,6 @@
 import type { WebContents } from 'electron'
 import { createExpect } from './expect'
+import { parseKey, unknownPart } from './keys'
 import { by, describeTarget, expectsOne, toDescriptor, type Target } from './targets'
 import { World } from './world'
 import type { LogLine } from '../shared/types'
@@ -103,10 +104,18 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     }
   }
 
-  async function press(key: string): Promise<void> {
+  /**
+   * Chromium submits a form and inserts text on the `char` event, not on
+   * `keyDown`, so a key that types something needs all three.
+   */
+  async function press(spec: string): Promise<void> {
+    const stroke = parseKey(spec)
+    if (!stroke) throw new Error(`press("${spec}"): unknown key "${unknownPart(spec)}"`)
+    const { keyCode, text, modifiers } = stroke
     markAction()
-    wc().sendInputEvent({ type: 'keyDown', keyCode: key })
-    wc().sendInputEvent({ type: 'keyUp', keyCode: key })
+    wc().sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+    if (text !== undefined) wc().sendInputEvent({ type: 'char', keyCode: text, modifiers })
+    wc().sendInputEvent({ type: 'keyUp', keyCode, modifiers })
     await sleep(60)
   }
 

@@ -1,0 +1,15 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Keys</title></head>
+<body>
+<form id="f"><input id="q" value=""></form>
+<script>
+  window.__keys = []
+  document.addEventListener('keydown', (e) => {
+    const mods = (e.ctrlKey ? 'C-' : '') + (e.metaKey ? 'M-' : '') + (e.altKey ? 'A-' : '') + (e.shiftKey ? 'S-' : '')
+    window.__keys.push(mods + e.key + (e.isTrusted ? '' : '(untrusted)'))
+  })
+  document.getElementById('f').addEventListener('submit', (e) => {
+    e.preventDefault()
+    document.title = 'SUBMITTED'
+  })
+</script>
+</body></html>
