@@ -10,6 +10,9 @@ export type Emit = (line: LogLine) => void
 /** Mirrors `FillPlan` in src/page/fill.ts, which crosses back as plain JSON. */
 type FillPlan = { ok: true; typed: string; expected: string } | { ok: false; reason: string }
 
+/** Mirrors `SelectResult` in src/page/select.ts. */
+type SelectResult = { ok: true; selected: string[] } | { ok: false; reason: string }
+
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /**
@@ -185,6 +188,24 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     await sleep(60)
   }
 
+  /**
+   * Picks options on a native `<select>` by value, or by label when no value
+   * matches, and returns the values selected afterwards.
+   *
+   * The popup of a native select is not part of the page, so this sets the
+   * options directly and fires `input` / `change`. Those two events are not
+   * trusted, unlike everything click() and type() send.
+   */
+  async function select(target: Target, value: string | string[]): Promise<string[]> {
+    const wanted = Array.isArray(value) ? value : [value]
+    await require(target, 'select', 5000)
+    markAction()
+    const r = await world.query<SelectResult | null>('select', toDescriptor(target), wanted)
+    if (!r) throw new Error(`select(${describeTarget(target)}): the element went away`)
+    if (!r.ok) throw new Error(`select(${describeTarget(target)}): ${r.reason}`)
+    return r.selected
+  }
+
   function waitForNavigation(timeout = 15000): Promise<void> {
     // Already navigated since the last action: settle instead of hanging.
     if (navSeq > actionSeq) { actionSeq = navSeq; return sleep(120) }
@@ -246,6 +267,7 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     click,
     type,
     fill,
+    select,
     press,
     waitFor,
     waitForNavigation,
