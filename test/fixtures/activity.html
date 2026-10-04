@@ -1,0 +1,22 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Activity</title></head>
+<body>
+<button id="save">저장</button>
+<button id="slow">느린 요청</button>
+<button id="list">목록</button>
+<button id="boom">예외</button>
+<button id="img">이미지</button>
+<button id="last">마지막</button>
+<script>
+  const on = (id, fn) => document.getElementById(id).addEventListener('click', fn)
+  on('save', async () => {
+    const r = await fetch('/api/save', { method: 'POST', body: '{}' })
+    if (!r.ok) console.error('Validation failed')
+    console.log('hidden-log')
+  })
+  on('slow', () => fetch('/api/slow'))
+  on('list', () => fetch('/api/list'))
+  on('boom', () => setTimeout(() => { throw new Error('boom') }))
+  on('img', () => { new Image().src = '/missing.png' })
+  on('last', () => fetch('/api/last'))
+</script>
+</body></html>
