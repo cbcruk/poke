@@ -67,7 +67,8 @@ export class Buffers {
   }
 
   private unique(name: string): string {
-    const base = name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'buffer'
+    // \w is ASCII-only, which turned every Korean name into "buffer".
+    const base = name.replace(/[^\p{L}\p{N}_.-]+/gu, '-').replace(/^-+|-+$/g, '') || 'buffer'
     if (!fs.existsSync(this.file(base))) return base
     for (let i = 2; ; i += 1) {
       const candidate = `${base}-${i}`

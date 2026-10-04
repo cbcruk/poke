@@ -11,6 +11,8 @@ const panel = { tabs: el('tabs'), url: el<HTMLInputElement>('url'), run: el<HTML
 
 let current: string | null = null
 let running = false
+/** The buffer whose tab is a name field; survives re-rendering the tabs. */
+let editing: string | null = null
 
 function put(message: string, kind: LogLine['kind'] = 'info'): void {
   const div = document.createElement('div')
@@ -36,10 +38,11 @@ async function renderTabs(select?: string): Promise<void> {
     tab.className = buf.id === current ? 'tab active' : 'tab'
     tab.textContent = buf.name
     tab.title = '더블클릭: 이름 변경 · 가운데 클릭: 삭제'
-    tab.addEventListener('click', () => void open(buf.id))
-    tab.addEventListener('dblclick', () => void rename(buf))
+    tab.addEventListener('click', () => { if (buf.id !== current) void open(buf.id) })
+    tab.addEventListener('dblclick', () => { editing = buf.id; editName(tab, buf) })
     tab.addEventListener('auxclick', (e) => { if (e.button === 1) void remove(buf) })
     panel.tabs.appendChild(tab)
+    if (buf.id === editing) editName(tab, buf)
   }
   if (current) editor.setValue(await window.poke.readBuffer(current))
 }
@@ -50,11 +53,35 @@ async function open(id: string): Promise<void> {
   editor.focus()
 }
 
-async function rename(buf: BufferMeta): Promise<void> {
-  const name = prompt('버퍼 이름', buf.name)
-  if (!name || name === buf.name) return
-  await window.poke.renameBuffer(buf.id, name)
-  await renderTabs()
+/**
+ * Turns a tab into a name field. Electron does not support `prompt()`, so
+ * names are edited in place: Enter or leaving the field keeps it, Escape
+ * drops it.
+ */
+function editName(tab: HTMLElement, buf: BufferMeta): void {
+  const input = document.createElement('input')
+  input.className = 'tab-name'
+  input.value = buf.name
+  input.spellcheck = false
+  tab.replaceWith(input)
+  input.focus()
+  input.select()
+
+  let settled = false
+  const settle = async (keep: boolean): Promise<void> => {
+    if (settled) return
+    settled = true
+    editing = null
+    const name = input.value.trim()
+    if (keep && name && name !== buf.name) await window.poke.renameBuffer(buf.id, name)
+    await renderTabs()
+    editor.focus()
+  }
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') void settle(true)
+    else if (e.key === 'Escape') void settle(false)
+  })
+  input.addEventListener('blur', () => void settle(true))
 }
 
 async function remove(buf: BufferMeta): Promise<void> {
@@ -85,10 +112,9 @@ async function run(): Promise<void> {
 
 panel.run.addEventListener('click', () => void run())
 el('add').addEventListener('click', async () => {
-  const name = prompt('새 버퍼 이름', 'scratch')
-  if (!name) return
-  const buf = await window.poke.createBuffer(name)
-  await open(buf.id)
+  const buf = await window.poke.createBuffer('scratch')
+  editing = buf.id
+  await renderTabs(buf.id)
 })
 panel.url.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return

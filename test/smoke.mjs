@@ -29,6 +29,15 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r))
 const site = `http://127.0.0.1:${server.address().port}`
 
+const portTaken = await new Promise((resolve) => {
+  const probe = http.get(`http://127.0.0.1:${PORT_CDP}/json/version`, () => resolve(true))
+  probe.on('error', () => resolve(false))
+})
+if (portTaken) {
+  console.error(`FAIL: port ${PORT_CDP} is already in use, probably by an electron left from an earlier run`)
+  process.exit(1)
+}
+
 const userData = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'poke-smoke-'))
 const electronArgs = [
   path.join(ROOT, 'node_modules/.bin/electron'), ROOT,
@@ -47,6 +56,11 @@ function shutdown() {
   server.close()
   fs.rmSync(userData, { recursive: true, force: true })
 }
+
+// A smoke run that throws must still kill its electron. One left behind keeps
+// port 9600, and the next run silently drives that old app instead.
+process.on('uncaughtException', (err) => bail(err.stack ?? String(err)))
+process.on('unhandledRejection', (err) => bail(err?.stack ?? String(err)))
 
 let browser
 for (let i = 0; i < 50; i++) {
@@ -470,6 +484,40 @@ await panel.evaluate((id) => window.__pokeTest.openBuffer(id), a.id)
 await wait(400)
 check('버퍼 전환 후 내용 유지', (await panel.evaluate(() => window.__pokeTest.getCode())).trim(), '// ALPHA')
 check('활성 버퍼 추적', await panel.evaluate(() => window.__pokeTest.activeTab()), a.id)
+
+// ---- 4. 버퍼 이름 (Electron 은 prompt() 를 지원하지 않는다) ----
+const tabNamed = async (name) => {
+  for (const t of await panel.$$('.tab')) {
+    if ((await t.evaluate((n) => n.textContent)) === name) return t
+  }
+  return null
+}
+const names = async () => (await panel.evaluate(() => window.poke.listBuffers())).map((b) => b.name)
+
+const r = await panel.evaluate(() => window.poke.createBuffer('rename-me'))
+await panel.evaluate((id) => window.__pokeTest.openBuffer(id), r.id)
+await (await tabNamed('rename-me')).click({ count: 2 })
+check('더블클릭하면 이름 입력란', await panel.evaluate(() => document.activeElement?.className), 'tab-name')
+await panel.keyboard.type('새이름')
+await panel.keyboard.press('Enter')
+await wait(300)
+check('Enter 로 이름 변경', (await names()).includes('새이름'), true)
+check('탭에도 반영', Boolean(await tabNamed('새이름')), true)
+
+await (await tabNamed('새이름')).click({ count: 2 })
+await panel.keyboard.type('버릴이름')
+await panel.keyboard.press('Escape')
+await wait(300)
+check('Escape 는 취소', (await names()).includes('새이름') && !(await names()).includes('버릴이름'), true)
+
+await panel.click('#add')
+await wait(300)
+check('+ 는 바로 이름 입력란', await panel.evaluate(() => document.activeElement?.className), 'tab-name')
+await panel.keyboard.type('added')
+await panel.keyboard.press('Enter')
+await wait(300)
+check('+ 로 이름 붙여 만들기', (await names()).includes('added'), true)
+check('만든 버퍼가 활성', await panel.evaluate(() => document.querySelector('.tab.active')?.textContent), 'added')
 
 shutdown()
 const failed = results.filter((r) => !r.ok)
