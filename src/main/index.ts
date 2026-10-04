@@ -44,10 +44,11 @@ app.whenReady().then(() => {
   layout()
   win.on('resize', layout)
 
-  const { api, onDidFinishLoad } = createApi(wc, emit)
+  const { api, onDidFinishLoad, onDidNavigateInPage } = createApi(wc, emit)
 
   view.webContents.loadURL('about:blank')
   view.webContents.on('did-finish-load', onDidFinishLoad)
+  view.webContents.on('did-navigate-in-page', onDidNavigateInPage)
   const sendUrl = (_e: unknown, url: string): void => {
     if (win && !win.isDestroyed()) win.webContents.send('url', url)
   }

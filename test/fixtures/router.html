@@ -1,0 +1,13 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Router</title></head>
+<body>
+<a id="to-detail" href="/router.html?view=detail">상세로</a>
+<h1 id="view">목록</h1>
+<script>
+  // 클라이언트 라우터 흉내: 문서를 새로 불러오지 않고 pushState 로만 이동한다
+  document.getElementById('to-detail').addEventListener('click', (e) => {
+    e.preventDefault()
+    history.pushState({}, '', '/router.html?view=detail')
+    document.getElementById('view').textContent = '상세'
+  })
+</script>
+</body></html>

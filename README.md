@@ -99,7 +99,7 @@ testing-library 는 DOM 안에서 돌아야 하는데, 남의 앱 페이지에 1
 pnpm smoke
 ```
 
-Xvfb 위에 앱을 띄우고 자기 UI를 CDP로 조작해 13개 항목을 확인한다.
+앱을 띄우고 자기 UI를 CDP로 조작해 확인한다. Linux에서는 Xvfb 위에, 그 밖에서는 화면에 창을 띄운다.
 `isTrusted: true`와 이동 후 코드 계속 실행이 핵심이다.
 
 ## 구조
