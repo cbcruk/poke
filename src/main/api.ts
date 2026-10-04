@@ -7,6 +7,9 @@ import type { LogLine } from '../shared/types'
 
 export type Emit = (line: LogLine) => void
 
+/** Mirrors `FillPlan` in src/page/fill.ts, which crosses back as plain JSON. */
+type FillPlan = { ok: true; typed: string; expected: string } | { ok: false; reason: string }
+
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /**
@@ -121,11 +124,49 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     await sleep(60)
   }
 
+  /** A `char` of "\n" inserts nothing; a line break is typed as Enter, as on a keyboard. */
+  async function typeChars(text: string): Promise<void> {
+    for (const ch of text.replace(/\r\n?/g, '\n')) {
+      if (ch === '\n') {
+        wc().sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
+        wc().sendInputEvent({ type: 'char', keyCode: '\r' })
+        wc().sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
+      } else {
+        wc().sendInputEvent({ type: 'char', keyCode: ch })
+      }
+      await sleep(12)
+    }
+  }
+
   async function type(target: Target, value: unknown): Promise<void> {
     await click(target)
-    for (const ch of String(value)) {
-      wc().sendInputEvent({ type: 'char', keyCode: ch })
-      await sleep(12)
+    await typeChars(String(value))
+  }
+
+  /**
+   * Replaces a field's value by typing, then checks the field took it.
+   *
+   * Unlike type(), a value the field would silently mangle fails before
+   * anything is typed: too long for `maxlength`, letters in a number field,
+   * a disabled or read-only field.
+   */
+  async function fill(target: Target, value: unknown): Promise<void> {
+    const text = String(value)
+    const fail = (why: string): Error => new Error(`fill(${describeTarget(target)}): ${why}`)
+    await require(target, 'fill', 5000)
+    const d = toDescriptor(target)
+    const plan = await world.query<FillPlan | null>('planFill', d, text)
+    if (!plan) throw fail('the element went away')
+    if (!plan.ok) throw fail(plan.reason)
+
+    await click(target)
+    await world.query('selectContents', d)
+    if (plan.typed === '') await press('Backspace')
+    else await typeChars(plan.typed)
+
+    const actual = await world.query<string | null>('value', d)
+    if (actual !== plan.expected) {
+      throw fail(`typed ${JSON.stringify(text)} but the field holds ${JSON.stringify(actual)}`)
     }
   }
 
@@ -204,6 +245,7 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     reload,
     click,
     type,
+    fill,
     press,
     waitFor,
     waitForNavigation,

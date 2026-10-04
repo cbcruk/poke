@@ -368,6 +368,42 @@ check('focus/blur 이벤트가 남', /"focus:a","blur:a","focus:b"/.test(logFocu
 const viewFocus = (await browser.pages()).find((p) => !p.url().includes('index.html'))
 check('실행이 끝나면 흉내를 끔', await viewFocus.evaluate(() => document.hasFocus()), false)
 
+// ---- 2g4. fill ----
+const logFill = await runCode(`
+const v = (sel) => evaluate('document.querySelector("' + sel + '").' + (sel === '#rich' ? 'textContent' : 'value'))
+const why = async (fn) => { try { await fn(); return 'ok' } catch (e) { return e.message } }
+await goto('${site}/input.html')
+await fill('#name', '새값')
+log('교체:', await v('#name'))
+log('신뢰:', await evaluate('JSON.stringify(__ev.filter((e) => e.startsWith("name:")).map((e) => e.endsWith(":true")))'))
+await fill('#name', '')
+log('비우기:', JSON.stringify(await v('#name')))
+await fill('#memo', '첫줄\\n둘째줄')
+log('여러 줄:', JSON.stringify(await v('#memo')))
+await fill('#name', '가\\n나')
+log('한 줄 input:', await v('#name'))
+await fill('#rich', '서식 없는 글')
+log('contenteditable:', await v('#rich'))
+log('maxlength:', await why(() => fill('#short', '12345')))
+log('maxlength 그대로:', JSON.stringify(await v('#short')))
+log('number:', await why(() => fill('#num', 'abc')))
+log('disabled:', await why(() => fill('#off', 'x')))
+log('readonly:', await why(() => fill('#ro', 'x')))
+log('type 은 덧붙임:', await (async () => { await type('#name', '끝'); return v('#name') })())
+`)
+check('fill 은 기존 값을 바꿈', /교체: 새값$/m.test(logFill), true)
+check('fill 입력은 신뢰됨', /신뢰: \[true(,true)*\]/.test(logFill), true)
+check('빈 값으로 비우기', /비우기: ""/.test(logFill), true)
+check('textarea 여러 줄', /여러 줄: "첫줄\\n둘째줄"/.test(logFill), true)
+check('한 줄 input 의 줄바꿈은 공백', /한 줄 input: 가 나$/m.test(logFill), true)
+check('contenteditable', /contenteditable: 서식 없는 글$/m.test(logFill), true)
+check('maxlength 초과는 입력 전에 실패', /maxlength: fill\("#short"\): 5 characters exceed maxlength 3/.test(logFill), true)
+check('실패하면 아무것도 치지 않음', /maxlength 그대로: ""/.test(logFill), true)
+check('number 에 글자', /number: fill\("#num"\): "abc" is not a valid number/.test(logFill), true)
+check('disabled', /disabled: fill\("#off"\): the field is disabled/.test(logFill), true)
+check('readonly', /readonly: fill\("#ro"\): the field is read-only/.test(logFill), true)
+check('type 은 그대로 덧붙임', /type 은 덧붙임: 가 나끝$/m.test(logFill), true)
+
 // ---- 2h. 응답하지 않는 페이지 ----
 // 메인 스레드가 막히면 CDP 평가가 돌아오지 않는다. 버퍼가 말없이 멈추면 안 된다.
 const logBusy = await runCode(`
