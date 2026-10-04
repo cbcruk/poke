@@ -2,7 +2,7 @@ import type { WebContents } from 'electron'
 import { createExpect } from './expect'
 import { parseKey, unknownPart } from './keys'
 import { by, describeTarget, expectsOne, toDescriptor, type Target } from './targets'
-import { World } from './world'
+import { World, type DialogAnswer } from './world'
 import type { LogLine } from '../shared/types'
 
 export type Emit = (line: LogLine) => void
@@ -20,6 +20,26 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
   const js = <T>(expr: string): Promise<T> => wc().executeJavaScript(expr, true) as Promise<T>
   // Element queries run beside the page, where testing-library lives.
   const world = new World(getWc)
+
+  // Electron accepts dialogs on its own, so an unanswered confirm() would
+  // quietly say yes. Each one is answered here and shows up in the log.
+  let nextAnswer: DialogAnswer | null = null
+  world.onDialog = (d) => {
+    const fallback: DialogAnswer = { accept: d.type === 'alert' || d.type === 'beforeunload' }
+    const answer = nextAnswer ?? fallback
+    nextAnswer = null
+    emit({
+      kind: 'dim',
+      message: `  · ${d.type}(${JSON.stringify(d.message)}) → ${answer.accept ? 'accepted' : 'dismissed'}`,
+    })
+    return answer
+  }
+
+  /** Called before each run, so nothing set up by a previous run leaks into it. */
+  async function prepare(): Promise<void> {
+    nextAnswer = null
+    await world.ready()
+  }
 
   // Navigation bookkeeping. A click often finishes navigating before the user's
   // next line runs, so waitForNavigation() must be able to see a load that
@@ -212,12 +232,16 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
       if (!r.ok) throw new Error(`evaluate: ${r.m}`)
       return r.v
     },
+    /** Accepts the next dialog instead of dismissing it. */
+    acceptNextDialog(): void {
+      nextAnswer = { accept: true }
+    },
     sleep,
     log,
     expect: createExpect(emit),
   }
 
-  return { api, onDidFinishLoad, onDidNavigateInPage }
+  return { api, prepare, onDidFinishLoad, onDidNavigateInPage }
 }
 
 export type PokeApi = ReturnType<typeof createApi>['api']
