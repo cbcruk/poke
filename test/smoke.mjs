@@ -350,6 +350,24 @@ await runCode(`acceptNextDialog()`)
 const logNextRun = await runCode(`await click('#del')\nlog('다음 실행:', await text('#out'))`)
 check('걸어둔 수락은 다음 실행으로 새지 않음', /다음 실행: 취소됨/.test(logNextRun), true)
 
+// ---- 2g3. 포커스 ----
+// 실제 사용은 에디터에서 Ctrl+Enter 를 누르는 것이라, 실행 순간 포커스는 에디터에 있다.
+await runCode(`await goto('${site}/focus.html')`)
+await panel.bringToFront()
+await panel.click('.cm-content')
+const logFocus = await runCode(`
+log('에디터 포커스:', String(await evaluate('document.hasFocus()')))
+await click('#a')
+log('클릭 후:', String(await evaluate('document.hasFocus()')), await evaluate('document.activeElement.id'))
+await click('#b')
+log('이벤트:', await evaluate('JSON.stringify(window.__ev)'))
+`)
+check('실행 중엔 페이지가 포커스를 가진 것처럼', /에디터 포커스: true/.test(logFocus), true)
+check('클릭한 입력란이 포커스', /클릭 후: true a/.test(logFocus), true)
+check('focus/blur 이벤트가 남', /"focus:a","blur:a","focus:b"/.test(logFocus), true)
+const viewFocus = (await browser.pages()).find((p) => !p.url().includes('index.html'))
+check('실행이 끝나면 흉내를 끔', await viewFocus.evaluate(() => document.hasFocus()), false)
+
 // ---- 2h. 응답하지 않는 페이지 ----
 // 메인 스레드가 막히면 CDP 평가가 돌아오지 않는다. 버퍼가 말없이 멈추면 안 된다.
 const logBusy = await runCode(`
