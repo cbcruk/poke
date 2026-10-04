@@ -1,0 +1,12 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Busy</title></head>
+<body>
+<h1>멈추는 페이지</h1>
+<button id="block">멈추기</button>
+<script>
+  // 메인 스레드를 7초 동안 붙잡는다. 그동안 CDP 평가는 응답하지 않는다.
+  document.getElementById('block').addEventListener('click', () => {
+    const until = Date.now() + 7000
+    while (Date.now() < until) {}
+  })
+</script>
+</body></html>

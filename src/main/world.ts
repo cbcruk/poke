@@ -3,37 +3,69 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Descriptor } from './targets'
 
+const WORLD_NAME = 'poke'
+
+/**
+ * How long a single query may take. Queries finish in milliseconds; one that
+ * runs this long means the page's main thread is stuck.
+ */
+const DEADLINE_MS = 5000
+
+const MISSING = '__pokeMissing'
+
+interface ContextEvent {
+  context?: { id: number; name: string; auxData?: { frameId?: string } }
+  executionContextId?: number
+  frame?: { id: string; parentId?: string }
+}
+
 /**
  * Element queries run in a CDP isolated world rather than in the page itself.
  * testing-library has to live in the DOM, and dropping 180kB plus a global
  * into someone's app to get it there is rude. An isolated world shares the DOM
  * and nothing else, so the app's own globals are untouched.
+ *
+ * The bundle is registered to run in every new document, so after navigation
+ * the world is already there and is found through context events instead of
+ * a round trip per query.
  */
 export class World {
   private contextId: number | null = null
-  private attached = false
+  private mainFrameId: string | null = null
+  private attaching: Promise<void> | null = null
+  private pending: { method: string; since: number } | null = null
   private readonly bundle: string
 
   constructor(private readonly getWc: () => WebContents) {
     this.bundle = fs.readFileSync(path.join(__dirname, '../page/queries.js'), 'utf8')
   }
 
-  /** Drop the world so the next call rebuilds it. Navigation destroys it. */
-  invalidate(): void {
-    this.contextId = null
-  }
-
   detach(): void {
     const wc = this.getWc()
-    if (this.attached && wc.debugger.isAttached()) wc.debugger.detach()
-    this.attached = false
-    this.contextId = null
+    if (wc.debugger.isAttached()) wc.debugger.detach()
   }
 
   async call<T>(method: string, ...args: unknown[]): Promise<T> {
-    const contextId = await this.ensure()
-    const expression = `__poke.${method}(${args.map((a) => JSON.stringify(a)).join(', ')})`
-    return this.evaluate<T>(expression, contextId)
+    const expression =
+      `globalThis.__poke ? __poke.${method}(${args.map((a) => JSON.stringify(a)).join(', ')})` +
+      ` : ${JSON.stringify(MISSING)}`
+
+    for (let attempt = 0; ; attempt++) {
+      const contextId = await this.ensure()
+      try {
+        const value = await this.evaluate<T | typeof MISSING>(expression, contextId)
+        if (value !== MISSING) return value
+        // A world we created by hand, or one whose script has not run yet.
+        return (await this.evaluate<T>(`${this.bundle};\n${expression}`, contextId)) as T
+      } catch (err) {
+        // The document went away between finding the context and using it.
+        if (attempt === 0 && /Cannot find context/.test(String(err))) {
+          if (this.contextId === contextId) this.contextId = null
+          continue
+        }
+        throw err
+      }
+    }
   }
 
   /** Convenience for the common shape: one descriptor in, a value out. */
@@ -42,40 +74,75 @@ export class World {
   }
 
   private async ensure(): Promise<number> {
-    if (this.contextId !== null) {
-      const alive = await this.evaluate<string>('typeof __poke', this.contextId).catch(() => null)
-      if (alive === 'object') return this.contextId
-    }
+    this.attaching ??= this.attach().catch((err) => {
+      this.attaching = null
+      throw err
+    })
+    await this.attaching
+    if (this.contextId !== null) return this.contextId
 
-    const wc = this.getWc()
-    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
-    this.attached = true
-    await wc.debugger.sendCommand('Page.enable')
-
-    const { frameTree } = (await wc.debugger.sendCommand('Page.getFrameTree')) as {
-      frameTree: { frame: { id: string } }
-    }
-    const { executionContextId } = (await wc.debugger.sendCommand('Page.createIsolatedWorld', {
-      frameId: frameTree.frame.id,
-      worldName: 'poke',
-    })) as { executionContextId: number }
-
+    // The document predates the script registration, or its world has not
+    // been reported yet. Make one by hand; call() installs the bundle.
+    const { executionContextId } = await this.send<{ executionContextId: number }>(
+      'Page.createIsolatedWorld',
+      { frameId: this.mainFrameId, worldName: WORLD_NAME }
+    )
     this.contextId = executionContextId
-    await this.evaluate('void 0', executionContextId, this.bundle)
     return executionContextId
   }
 
-  private async evaluate<T>(expression: string, contextId: number, prelude?: string): Promise<T> {
+  private async attach(): Promise<void> {
     const wc = this.getWc()
-    const result = (await wc.debugger.sendCommand('Runtime.evaluate', {
-      expression: prelude ? `${prelude};\n${expression}` : expression,
-      contextId,
-      returnByValue: true,
-      awaitPromise: true,
-    })) as {
+    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
+    wc.debugger.on('message', (_e, method, params) => this.onEvent(method, params as ContextEvent))
+    wc.debugger.on('detach', () => {
+      this.attaching = null
+      this.contextId = null
+      this.pending = null
+    })
+
+    await this.send('Page.enable')
+    await this.send('Runtime.enable')
+    const { frameTree } = await this.send<{ frameTree: { frame: { id: string } } }>(
+      'Page.getFrameTree'
+    )
+    this.mainFrameId = frameTree.frame.id
+    await this.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: this.bundle,
+      worldName: WORLD_NAME,
+    })
+  }
+
+  private onEvent(method: string, params: ContextEvent): void {
+    switch (method) {
+      case 'Runtime.executionContextCreated': {
+        const ctx = params.context
+        // Chrome can report more than one context under the same world name,
+        // including the ones we create by hand. The newest one in the main
+        // frame belongs to the current document; call() installs the bundle
+        // if it is not there yet.
+        if (ctx?.name === WORLD_NAME && ctx.auxData?.frameId === this.mainFrameId) {
+          this.contextId = ctx.id
+        }
+        break
+      }
+      case 'Runtime.executionContextDestroyed':
+        if (params.executionContextId === this.contextId) this.contextId = null
+        break
+      case 'Runtime.executionContextsCleared':
+        this.contextId = null
+        break
+      case 'Page.frameNavigated':
+        if (params.frame && !params.frame.parentId) this.mainFrameId = params.frame.id
+        break
+    }
+  }
+
+  private async evaluate<T>(expression: string, contextId: number): Promise<T> {
+    const result = await this.send<{
       result: { value: T }
       exceptionDetails?: { text: string; exception?: { description?: string } }
-    }
+    }>('Runtime.evaluate', { expression, contextId, returnByValue: true, awaitPromise: true })
 
     if (result.exceptionDetails) {
       const { exception, text } = result.exceptionDetails
@@ -84,5 +151,44 @@ export class World {
       throw new Error(message)
     }
     return result.result.value
+  }
+
+  /**
+   * A command already sent cannot be cancelled, so the deadline only ends the
+   * wait. While that reply is still outstanding, further commands would queue
+   * behind it in the same stuck renderer, so they are refused at once.
+   */
+  private send<T = unknown>(method: string, params?: object): Promise<T> {
+    if (this.pending) {
+      const waited = Date.now() - this.pending.since
+      return Promise.reject(
+        new Error(
+          `the page is still waiting on an earlier ${this.pending.method} (${waited}ms). ` +
+            `Its main thread is busy; try again once it settles.`
+        )
+      )
+    }
+
+    const sent = this.getWc().debugger.sendCommand(method, params) as Promise<T>
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const pending = { method, since: Date.now() - DEADLINE_MS }
+        this.pending = pending
+        const clear = (): void => {
+          if (this.pending === pending) this.pending = null
+        }
+        sent.then(clear, clear)
+        reject(
+          new Error(
+            `the page did not answer within ${DEADLINE_MS}ms: ${method}. ` +
+              `Its main thread may be stuck in a loop, or held by a dialog.`
+          )
+        )
+      }, DEADLINE_MS)
+      sent.then(
+        (value) => { clearTimeout(timer); resolve(value) },
+        (err) => { clearTimeout(timer); reject(err) }
+      )
+    })
   }
 }

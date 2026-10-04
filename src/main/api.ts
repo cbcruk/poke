@@ -31,12 +31,9 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     navSeq += 1
     for (const wake of navWaiters) wake()
   }
-  const onDidFinishLoad = (): void => {
-    world.invalidate() // navigation destroys the isolated world
-    navigated()
-  }
+  const onDidFinishLoad = (): void => navigated()
   // A client-side router moves with pushState, which never fires
-  // did-finish-load. The document and its isolated world both survive.
+  // did-finish-load.
   const onDidNavigateInPage = (_e: unknown, _url: string, isMainFrame: boolean): void => {
     if (isMainFrame) navigated()
   }

@@ -297,6 +297,37 @@ check('querySelectorAll 을 들먹이지 않음', /querySelectorAll/.test(logQuo
 const logBadCss = await runCode(`await goto('${site}/rooms.html')\nawait text('div[')`)
 check('잘못된 선택자도 poke 의 말로', /"div\[" is not a valid CSS selector/.test(logBadCss), true)
 
+// ---- 2h. 응답하지 않는 페이지 ----
+// 메인 스레드가 막히면 CDP 평가가 돌아오지 않는다. 버퍼가 말없이 멈추면 안 된다.
+const logBusy = await runCode(`
+await goto('${site}/busy.html')
+await click('#block')
+const started = Date.now()
+try { await text('h1') } catch (e) { log('첫 호출:', e.message) }
+log('첫 호출 시간:', String(Date.now() - started < 6500))
+const again = Date.now()
+try { await text('h1') } catch (e) { log('두번째:', e.message) }
+log('두번째 즉시:', String(Date.now() - again < 500))
+await sleep(3000)
+log('회복:', await text('h1'))
+`)
+check('막힌 페이지는 데드라인으로 실패', /첫 호출: .*did not answer within 5000ms/.test(logBusy), true)
+check('데드라인은 7초 블록보다 먼저', /첫 호출 시간: true/.test(logBusy), true)
+check('걸린 호출 뒤엔 바로 거절', /두번째: .*still waiting/.test(logBusy), true)
+check('거절은 기다리지 않음', /두번째 즉시: true/.test(logBusy), true)
+check('풀리면 회복', /회복: 멈추는 페이지/.test(logBusy), true)
+
+// ---- 2i. 격리 월드는 문서와 함께 생긴다 ----
+// 생존 확인 왕복 없이, 새 문서마다 번들이 미리 설치돼 있어야 한다.
+const logPre = await runCode(`
+await goto('${site}/page1.html')
+await click('#link')
+await waitForNavigation()
+log('미리 설치:', await text('h1'))
+`)
+check('이동 직후 쿼리', /미리 설치: Page Two/.test(logPre), true)
+check('메인 월드 오염 없음 (이동 후)', await (await browser.pages()).find((p) => !p.url().includes('index.html')).evaluate(() => typeof window.__poke), 'undefined')
+
 // ---- 3. 버퍼 전환 ----
 const a = await panel.evaluate(() => window.poke.createBuffer('alpha'))
 await panel.evaluate((id) => window.__pokeTest.openBuffer(id), a.id)
