@@ -297,6 +297,30 @@ check('querySelectorAll 을 들먹이지 않음', /querySelectorAll/.test(logQuo
 const logBadCss = await runCode(`await goto('${site}/rooms.html')\nawait text('div[')`)
 check('잘못된 선택자도 poke 의 말로', /"div\[" is not a valid CSS selector/.test(logBadCss), true)
 
+// ---- 2h0. 키 입력 ----
+const logKeys = await runCode(`
+await goto('${site}/keys.html')
+await click('#q')
+await press('Enter')
+log('제출:', await title())
+await type('#q', 'xy')
+await press('Control+a')
+log('Ctrl+a 는 글자를 넣지 않음:', await evaluate('document.querySelector("#q").value'))
+await press('ctrl+shift+K')
+await press('Escape')
+await press('ArrowDown')
+await press('Space')
+log('키:', JSON.stringify(await evaluate('window.__keys')))
+`)
+check('Enter 로 폼 제출', /제출: SUBMITTED/.test(logKeys), true)
+check('수식키 조합은 글자를 넣지 않음', /Ctrl\+a 는 글자를 넣지 않음: xy$/m.test(logKeys), true)
+check('수식키가 실린 keydown', /"C-a"/.test(logKeys) && /"C-S-K"/.test(logKeys), true)
+check('특수 키 이름', /"Escape","ArrowDown"," "/.test(logKeys), true)
+check('키 입력은 전부 신뢰됨', /untrusted/.test(logKeys), false)
+
+const logBadKey = await runCode(`await press('Ctrl+Foo')`)
+check('모르는 키는 이유를 말하며 실패', /press\("Ctrl\+Foo"\): unknown key "Foo"/.test(logBadKey), true)
+
 // ---- 2h. 응답하지 않는 페이지 ----
 // 메인 스레드가 막히면 CDP 평가가 돌아오지 않는다. 버퍼가 말없이 멈추면 안 된다.
 const logBusy = await runCode(`

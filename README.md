@@ -30,7 +30,7 @@ Ctrl+Enter 또는 Run 버튼으로 버퍼를 실행한다.
 | --- | --- |
 | `goto(url)` | 이동 (이미 그 주소면 그대로 둔다) |
 | `reload()` | 실제로 다시 불러오기 |
-| `click(대상)` / `type(대상, text)` / `press(key)` | 신뢰된 입력 |
+| `click(대상)` / `type(대상, text)` / `press(key)` | 신뢰된 입력. `press` 는 `Enter`, `ArrowDown`, `Ctrl+Shift+K` 처럼 받는다 |
 | `waitFor(대상, ms)` / `waitForNavigation(ms)` | 대기 |
 | `text(대상)` / `attr(대상, name)` | 읽기 (요소를 기다린다) |
 | `texts(대상)` / `count(대상)` | 개수 세기 (기다리지 않는다) |
