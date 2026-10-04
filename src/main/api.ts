@@ -1,4 +1,5 @@
 import type { WebContents } from 'electron'
+import { inspect } from 'node:util'
 import { Activity } from './activity'
 import { createExpect } from './expect'
 import { parseKey, unknownPart } from './keys'
@@ -261,10 +262,14 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     await waitForNavigation()
   }
 
+  // inspect rather than JSON.stringify: Map and Set print as {}, and BigInt
+  // or a cycle throws, which used to end the whole run at a log() line.
   const log = (...args: unknown[]): void =>
     emit({
       kind: 'info',
-      message: args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '),
+      message: args
+        .map((a) => (typeof a === 'string' ? a : inspect(a, { depth: 4, breakLength: Infinity })))
+        .join(' '),
     })
 
   /** Wraps an action so the log shows it before it runs. */

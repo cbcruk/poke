@@ -483,6 +483,30 @@ check('실패한 리소스는 보임', /↳ GET \/missing\.png 404/.test(logAct)
 check('마지막 동작의 요청을 기다려 보여줌', /↳ GET \/api\/last 200/.test(logAct), true)
 check('그래도 done 이 마지막', /^done \(/.test(actLines[actLines.length - 1]), true)
 
+// ---- 2g7. log 가 값을 찍는 방식 ----
+// JSON.stringify 로 찍으면 Map 은 {} 가 되고 BigInt 와 순환 참조는 예외를 낸다.
+const logValues = await runCode(`
+log('map:', new Map([['a', 1]]))
+log('set:', new Set([1, 2]))
+log('bigint:', 10n)
+const o = { name: 'o' }
+o.self = o
+log('cycle:', o)
+log('undef:', undefined)
+log('nested:', { a: [1, { b: 2 }] })
+log('page:', await evaluate('({ n: 1, list: [1, 2] })'))
+log('page map:', await evaluate('new Map([["k", 1]])'))
+`)
+check('Map 내용', /map: Map\(1\) \{ 'a' => 1 \}/.test(logValues), true)
+check('Set 내용', /set: Set\(2\) \{ 1, 2 \}/.test(logValues), true)
+check('BigInt', /bigint: 10n/.test(logValues), true)
+check('순환 참조', /cycle: <ref \*1> \{ name: 'o', self: \[Circular \*1\] \}/.test(logValues), true)
+check('undefined', /undef: undefined/.test(logValues), true)
+check('중첩 객체는 한 줄', /nested: \{ a: \[ 1, \{ b: 2 \} \] \}/.test(logValues), true)
+check('evaluate 결과 객체', /page: \{ n: 1, list: \[ 1, 2 \] \}/.test(logValues), true)
+check('페이지의 Map 도 Map 으로 넘어옴', /page map: Map\(1\) \{ 'k' => 1 \}/.test(logValues), true)
+check('log 때문에 실패하지 않음', /done \(/.test(logValues), true)
+
 // ---- 2h. 응답하지 않는 페이지 ----
 // 메인 스레드가 막히면 CDP 평가가 돌아오지 않는다. 버퍼가 말없이 멈추면 안 된다.
 const logBusy = await runCode(`
