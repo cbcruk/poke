@@ -33,6 +33,7 @@ Ctrl+Enter 또는 Run 버튼으로 버퍼를 실행한다.
 | `click(대상)` / `type(대상, text)` / `press(key)` | 신뢰된 입력. `press` 는 `Enter`, `ArrowDown`, `Ctrl+Shift+K` 처럼 받는다 |
 | `fill(대상, text)` | 값을 지우고 신뢰된 입력으로 바꾼 뒤 들어갔는지 확인. `maxlength` 초과, number 에 글자, disabled·readonly 는 치기 전에 실패 |
 | `select(대상, value \| value[])` | 네이티브 `<select>` 고르기. value 로, 없으면 라벨로 찾고 선택된 값들을 돌려준다. 팝업은 페이지 밖이라 이 하나만 `change` 가 신뢰되지 않은 이벤트다 |
+| `component(대상, name?)` / `setState(대상, key, value, name?)` | 요소를 그린 React · Vue 컴포넌트의 props 와 state 읽기 · 쓰기 (개발 빌드) |
 | `waitFor(대상, ms)` / `waitForNavigation(ms)` | 대기 |
 | `text(대상)` / `attr(대상, name)` | 읽기 (요소를 기다린다) |
 | `texts(대상)` / `count(대상)` | 개수 세기 (기다리지 않는다) |
@@ -114,6 +115,28 @@ testing-library 는 DOM 안에서 돌아야 하는데, 남의 앱 페이지에 1
 문서 이동, 실패한 요청(4xx·5xx·네트워크 오류), `console.error` / `warn`, 잡히지 않은 예외다.
 성공한 이미지·CSS·스크립트와 `console.log` 는 숨긴다. 마지막 동작이 보낸 요청은 최대 2초
 기다렸다가 보여주고 실행을 끝낸다.
+
+### 컴포넌트 상태
+
+`component(대상)` 은 그 요소를 그린 가장 가까운 React 또는 Vue 컴포넌트를 돌려준다.
+이름을 주면 그 이름의 조상까지 올라간다.
+
+```js
+const c = await component(byRole('button', { name: /저장/ }))
+// { framework: 'react', name: 'SaveButton', props: {...},
+//   state: [{ key: 0, kind: 'useState', value: false }, ...] }
+await setState(byRole('button', { name: /저장/ }), 0, true)
+```
+
+`setState` 의 `key` 는 `component()` 가 보여주는 그것이다. React 함수 컴포넌트는
+`useState` / `useReducer` 의 순번이고 `useReducer` 에는 action 으로 들어간다. 클래스
+컴포넌트와 Vue 는 이름이다. 쓴 뒤 다시 읽어 값이 들어갔는지 보고, setter 없는 computed
+처럼 받지 않으면 실패한다.
+
+개발 빌드가 DOM 노드에 남기는 속성(`__reactFiber$…`, `__vueParentComponent`)만 읽는다.
+devtools 훅을 심지 않으므로 앱의 `window` 에 아무것도 놓지 않고, 이미 열려 있던 페이지에도
+된다. 그 속성은 메인 월드에만 보이므로 요소는 격리 월드에서 찾고 CDP 로 메인 월드에 넘긴다.
+Svelte · Solid 는 컴파일 단계 플러그인이 있어야 해서 다루지 않는다.
 
 ### 포커스
 

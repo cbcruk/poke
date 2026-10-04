@@ -115,6 +115,58 @@ export class World {
     }
   }
 
+  /**
+   * Runs `fn` in the page's main world with `this` bound to the element
+   * `descriptor` names, and returns its result by value.
+   *
+   * The element is found here, in the isolated world, and handed over by
+   * reference: properties a framework sets on DOM nodes belong to the main
+   * world and are invisible from this one. Nothing is added to the page.
+   *
+   * @returns The function's result, or `null` when nothing matched.
+   */
+  async onElement<T>(descriptor: Descriptor, fn: Function, args: unknown[]): Promise<T | null> {
+    const contextId = await this.ensure()
+    const group = 'poke-element'
+    const lookup = `globalThis.__poke ? __poke.element(${JSON.stringify(descriptor)}) : ${JSON.stringify(MISSING)}`
+    const find = (expression: string) =>
+      this.send<{ result: { objectId?: string; value?: unknown } }>('Runtime.evaluate', {
+        expression,
+        contextId,
+        objectGroup: group,
+      })
+    try {
+      let found = await find(lookup)
+      if (found.result.value === MISSING) found = await find(`${this.bundle};\n${lookup}`)
+      if (!found.result.objectId) return null
+
+      const { node } = await this.send<{ node: { backendNodeId: number } }>('DOM.describeNode', {
+        objectId: found.result.objectId,
+      })
+      // Without an executionContextId the node resolves in the main world.
+      const { object } = await this.send<{ object: { objectId: string } }>('DOM.resolveNode', {
+        backendNodeId: node.backendNodeId,
+        objectGroup: group,
+      })
+      const reply = await this.send<{
+        result: { value: T }
+        exceptionDetails?: { text: string; exception?: { description?: string } }
+      }>('Runtime.callFunctionOn', {
+        objectId: object.objectId,
+        functionDeclaration: fn.toString(),
+        arguments: args.map((value) => ({ value })),
+        returnByValue: true,
+      })
+      if (reply.exceptionDetails) {
+        const { exception, text } = reply.exceptionDetails
+        throw new Error((exception?.description ?? text).split('\n')[0])
+      }
+      return reply.result.value
+    } finally {
+      void this.send('Runtime.releaseObjectGroup', { objectGroup: group }).catch(() => {})
+    }
+  }
+
   /** Convenience for the common shape: one descriptor in, a value out. */
   query<T>(method: string, descriptor: Descriptor, ...rest: unknown[]): Promise<T> {
     return this.call<T>(method, descriptor, ...rest)

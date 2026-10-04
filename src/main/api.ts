@@ -1,6 +1,7 @@
 import type { WebContents } from 'electron'
-import { inspect } from 'node:util'
+import { inspect, isDeepStrictEqual } from 'node:util'
 import { Activity } from './activity'
+import { componentOnElement, type ComponentInfo, type ComponentReply } from './component-page'
 import { createExpect } from './expect'
 import { parseKey, unknownPart } from './keys'
 import { by, describeTarget, expectsOne, toDescriptor, type Target } from './targets'
@@ -213,6 +214,65 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     return r.selected
   }
 
+  async function readComponent(
+    target: Target,
+    method: string,
+    name: string | undefined,
+    write: { key: string | number; value: unknown } | null
+  ): Promise<ComponentInfo> {
+    const reply = await world.onElement<ComponentReply<ComponentInfo>>(
+      toDescriptor(target),
+      componentOnElement,
+      [name ?? null, write]
+    )
+    if (!reply) throw new Error(`${method}(${describeTarget(target)}): the element went away`)
+    if (!reply.ok) throw new Error(`${method}(${describeTarget(target)}): ${reply.reason}`)
+    return reply.value
+  }
+
+  /**
+   * The React or Vue component that rendered an element: its name, props and
+   * state. Without `name` it is the nearest one; with it, the nearest
+   * ancestor of that name.
+   *
+   * Reads what development builds put on DOM nodes, so nothing is installed
+   * in the page and it works on a page that was already open.
+   */
+  async function component(target: Target, name?: string): Promise<ComponentInfo> {
+    await require(target, 'component', 5000)
+    return readComponent(target, 'component', name, null)
+  }
+
+  /**
+   * Changes one piece of a component's state, then checks it took.
+   *
+   * `key` is the `key` that component() lists: the position of a
+   * `useState` / `useReducer` in a React function component, or a state name
+   * for a React class or a Vue component. A `useReducer` receives `value` as
+   * an action, as its own dispatch would.
+   */
+  async function setState(
+    target: Target,
+    key: string | number,
+    value: unknown,
+    name?: string
+  ): Promise<ComponentInfo> {
+    const label = `setState(${describeTarget(target)})`
+    await require(target, 'setState', 5000)
+    markAction()
+    await readComponent(target, 'setState', name, { key, value })
+    // React renders the update asynchronously; give it a frame before reading back.
+    await sleep(50)
+    const after = await readComponent(target, 'setState', name, null)
+    const entry = after.state.find((e) => e.key === key)
+    const took = entry && (entry.kind === 'useReducer' || isDeepStrictEqual(entry.value, value) ||
+      JSON.stringify(entry.value) === JSON.stringify(value))
+    if (!took) {
+      throw new Error(`${label}: ${JSON.stringify(key)} still holds ${inspect(entry?.value)} after setting ${inspect(value)}`)
+    }
+    return after
+  }
+
   function waitForNavigation(timeout = 15000): Promise<void> {
     // Already navigated since the last action: settle instead of hanging.
     if (navSeq > actionSeq) { actionSeq = navSeq; return sleep(120) }
@@ -292,6 +352,8 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     fill: acted('fill', fill, (t, v) => [describeTarget(t), str(v)]),
     select: acted('select', select, (t, v) => [describeTarget(t), JSON.stringify(v)]),
     press: acted('press', press, (k) => [str(k)]),
+    setState: acted('setState', setState, (t, k, v) => [describeTarget(t), JSON.stringify(k), inspect(v)]),
+    component,
     waitFor,
     waitForNavigation,
     ...by,

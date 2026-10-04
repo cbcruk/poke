@@ -1,6 +1,7 @@
 // Launches poke under Xvfb and drives its own UI over CDP.
 // Verifies the two things a DevTools snippet cannot do, plus the editor loop.
 import puppeteer from 'puppeteer-core'
+import { build } from 'esbuild'
 import { spawn } from 'node:child_process'
 import http from 'node:http'
 import fs from 'node:fs'
@@ -19,7 +20,29 @@ const check = (name, actual, expected) => {
   console.log(`${ok ? '✓' : '✗'} ${name}${ok ? '' : `  (기대 ${expected}, 실제 ${actual})`}`)
 }
 
+// React 19 ships no UMD build, so the framework fixtures are bundled here as
+// development builds, which is what a dev server would serve.
+const built = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'poke-built-'))
+await build({
+  entryPoints: ['react-app.jsx', 'vue-app.js'].map((f) => path.join(HERE, 'fixtures/src', f)),
+  bundle: true,
+  outdir: built,
+  jsx: 'automatic',
+  define: {
+    'process.env.NODE_ENV': '"development"',
+    __VUE_OPTIONS_API__: 'true',
+    __VUE_PROD_DEVTOOLS__: 'false',
+    __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false',
+  },
+  logLevel: 'error',
+})
+
 const server = http.createServer((req, res) => {
+  if (req.url.startsWith('/built/')) {
+    res.writeHead(200, { 'Content-Type': 'text/javascript' })
+    res.end(fs.readFileSync(path.join(built, path.basename(req.url))))
+    return
+  }
   if (req.url.startsWith('/api/')) {
     const status = req.url === '/api/save' ? 500 : 200
     const delay = req.url === '/api/slow' ? 800 : req.url === '/api/last' ? 300 : 0
@@ -70,6 +93,7 @@ function shutdown() {
   try { process.kill(-proc.pid, 'SIGKILL') } catch {}
   server.close()
   fs.rmSync(userData, { recursive: true, force: true })
+  fs.rmSync(built, { recursive: true, force: true })
 }
 
 // A smoke run that throws must still kill its electron. One left behind keeps
@@ -506,6 +530,57 @@ check('중첩 객체는 한 줄', /nested: \{ a: \[ 1, \{ b: 2 \} \] \}/.test(lo
 check('evaluate 결과 객체', /page: \{ n: 1, list: \[ 1, 2 \] \}/.test(logValues), true)
 check('페이지의 Map 도 Map 으로 넘어옴', /page map: Map\(1\) \{ 'k' => 1 \}/.test(logValues), true)
 check('log 때문에 실패하지 않음', /done \(/.test(logValues), true)
+
+// ---- 2g8. 컴포넌트 상태 ----
+// 개발 빌드가 DOM 노드에 남기는 속성만 읽는다. 페이지에 전역을 놓지 않는다.
+const logReact = await runCode(`
+const why = async (fn) => { try { await fn(); return 'ok' } catch (e) { return e.message } }
+await goto('${site}/react.html')
+const c = await component('#counter')
+log('react:', c.framework, c.name, JSON.stringify(c.props), JSON.stringify(c.state))
+log('위로:', (await component('#counter', 'App')).name)
+log('h1 의 주인:', (await component('h1')).name)
+await setState('#counter', 0, 41)
+log('useState:', await text('#counter'))
+await setState('#counter', 1, { done: true })
+log('useReducer:', await text('#counter'))
+await click('#counter')
+log('그 뒤 클릭:', await text('#counter'))
+log('렌더 뒤 읽기:', JSON.stringify((await component('#counter')).state[0].value))
+log('없는 인덱스:', await why(() => setState('#counter', 5, 1)))
+log('없는 이름:', await why(() => component('#counter', 'Nope')))
+log('전역:', await evaluate('typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__'))
+`)
+check('React 컴포넌트 읽기', /react: react Counter \{"label":"클릭"\} \[\{"key":0,"kind":"useState","value":0\},\{"key":1,"kind":"useReducer","value":\{"done":false\}\}\]/.test(logReact), true)
+check('이름으로 조상 찾기', /위로: App/.test(logReact), true)
+check('요소를 그린 컴포넌트', /h1 의 주인: App/.test(logReact), true)
+check('useState 쓰기', /useState: 클릭: 41 todo/.test(logReact), true)
+check('useReducer 는 action 으로', /useReducer: 클릭: 41 done/.test(logReact), true)
+check('쓴 값에서 이어짐', /그 뒤 클릭: 클릭: 42 done/.test(logReact), true)
+check('다시 렌더링된 뒤에도 현재 값', /렌더 뒤 읽기: 42/.test(logReact), true)
+check('없는 hook 인덱스', /없는 인덱스: setState\("#counter"\): no useState\/useReducer at index 5; it has 2/.test(logReact), true)
+check('없는 이름은 찾은 조상을 보여줌', /없는 이름: component\("#counter"\): no React component named "Nope" above this element; found Counter < App/.test(logReact), true)
+check('React 전역 훅 없음', /전역: undefined/.test(logReact), true)
+
+const logVue = await runCode(`
+const why = async (fn) => { try { await fn(); return 'ok' } catch (e) { return e.message } }
+await goto('${site}/vue.html')
+const v = await component('#counter')
+log('vue:', v.framework, v.name, JSON.stringify(v.props), JSON.stringify(v.state))
+await setState('#counter', 'count', 5)
+log('쓰기:', await text('#counter'))
+log('computed:', await why(() => setState('#counter', 'double', 3)))
+log('없는 키:', await why(() => setState('#counter', 'nope', 1)))
+log('전역:', await evaluate('typeof window.__VUE_DEVTOOLS_GLOBAL_HOOK__'))
+await goto('${site}/page1.html')
+log('프레임워크 없음:', await why(() => component('h1')))
+`)
+check('Vue 컴포넌트 읽기', /vue: vue Counter \{"label":"클릭"\} \[\{"key":"count","kind":"setup","value":0\},\{"key":"double","kind":"setup","value":0\}\]/.test(logVue), true)
+check('Vue 쓰기', /쓰기: 클릭: 5 10/.test(logVue), true)
+check('computed 는 읽기 전용', /computed: setState\("#counter"\): "double" did not take the value; it is read-only/.test(logVue), true)
+check('없는 키는 있는 키를 보여줌', /없는 키: setState\("#counter"\): no state "nope"; it has count, double/.test(logVue), true)
+check('Vue 전역 훅 없음', /전역: undefined/.test(logVue), true)
+check('프레임워크 없는 페이지', /프레임워크 없음: component\("h1"\): no React or Vue component owns this element/.test(logVue), true)
 
 // ---- 2h. 응답하지 않는 페이지 ----
 // 메인 스레드가 막히면 CDP 평가가 돌아오지 않는다. 버퍼가 말없이 멈추면 안 된다.
