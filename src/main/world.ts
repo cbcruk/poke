@@ -78,6 +78,17 @@ export class World {
     await this.attaching
   }
 
+  /**
+   * Makes the page behave as if it had focus, without taking it.
+   *
+   * A buffer runs from the editor, so the page view never has real focus:
+   * `document.hasFocus()` is false and inputs fire no `focus` / `blur`.
+   */
+  async emulateFocus(enabled: boolean): Promise<void> {
+    await this.ready()
+    await this.send('Emulation.setFocusEmulationEnabled', { enabled })
+  }
+
   async call<T>(method: string, ...args: unknown[]): Promise<T> {
     const expression =
       `globalThis.__poke ? __poke.${method}(${args.map((a) => JSON.stringify(a)).join(', ')})` +

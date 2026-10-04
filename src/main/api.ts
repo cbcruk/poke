@@ -38,7 +38,12 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
   /** Called before each run, so nothing set up by a previous run leaks into it. */
   async function prepare(): Promise<void> {
     nextAnswer = null
-    await world.ready()
+    await world.emulateFocus(true)
+  }
+
+  /** Hands focus back once the run ends; the editor is where it really is. */
+  async function finish(): Promise<void> {
+    await world.emulateFocus(false).catch(() => {})
   }
 
   // Navigation bookkeeping. A click often finishes navigating before the user's
@@ -241,7 +246,7 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     expect: createExpect(emit),
   }
 
-  return { api, prepare, onDidFinishLoad, onDidNavigateInPage }
+  return { api, prepare, finish, onDidFinishLoad, onDidNavigateInPage }
 }
 
 export type PokeApi = ReturnType<typeof createApi>['api']
