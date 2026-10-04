@@ -94,6 +94,27 @@ testing-library 는 DOM 안에서 돌아야 하는데, 남의 앱 페이지에 1
 `describe`와 `it`은 없다. 매처 호출마다 로그에 체크 표시가 한 줄씩 남고,
 실패한 지점에서 실행이 멈춘다.
 
+### 동작이 일으킨 일
+
+동작(`goto` `click` `type` `fill` `select` `press` `reload`)마다 번호가 붙은 줄이 로그에
+남고, 그 동작이 일으킨 요청과 콘솔 오류가 생기는 즉시 그 아래에 붙는다. 저장 버튼이 왜
+안 먹는지 보려고 DevTools 를 따로 열 필요가 없다.
+
+```
+#2 click("#save")
+  ↳ POST /api/save 500 (230ms)
+  ↳ console.error: Validation failed
+#3 click("#slow")
+#4 click("#list")
+  ↳ GET /api/list 200 (3ms)
+  ↳ #3 GET /api/slow 200 (804ms)
+```
+
+다음 동작이 시작된 뒤에 끝난 요청은 보낸 동작의 번호를 앞에 단다. 보이는 것은 fetch·XHR·
+문서 이동, 실패한 요청(4xx·5xx·네트워크 오류), `console.error` / `warn`, 잡히지 않은 예외다.
+성공한 이미지·CSS·스크립트와 `console.log` 는 숨긴다. 마지막 동작이 보낸 요청은 최대 2초
+기다렸다가 보여주고 실행을 끝낸다.
+
 ### 포커스
 
 버퍼는 에디터에서 실행하므로 그 순간 진짜 포커스는 에디터에 있다. 그대로면 페이지는

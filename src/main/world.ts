@@ -60,6 +60,9 @@ export class World {
    */
   onDialog: (dialog: Dialog) => DialogAnswer = (d) => ({ accept: d.type !== 'confirm' })
 
+  /** Receives every CDP event, for watching what the page does. */
+  onPageEvent: ((method: string, params: unknown) => void) | null = null
+
   constructor(private readonly getWc: () => WebContents) {
     this.bundle = fs.readFileSync(path.join(__dirname, '../page/queries.js'), 'utf8')
   }
@@ -134,7 +137,10 @@ export class World {
   private async attach(): Promise<void> {
     const wc = this.getWc()
     if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
-    wc.debugger.on('message', (_e, method, params) => this.onEvent(method, params as PageEvent))
+    wc.debugger.on('message', (_e, method, params) => {
+      this.onEvent(method, params as PageEvent)
+      this.onPageEvent?.(method, params)
+    })
     wc.debugger.on('detach', () => {
       this.attaching = null
       this.contextId = null
@@ -143,6 +149,8 @@ export class World {
 
     await this.send('Page.enable')
     await this.send('Runtime.enable')
+    await this.send('Network.enable')
+    await this.send('Log.enable')
     const { frameTree } = await this.send<{ frameTree: { frame: { id: string } } }>(
       'Page.getFrameTree'
     )

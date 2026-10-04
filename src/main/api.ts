@@ -1,4 +1,5 @@
 import type { WebContents } from 'electron'
+import { Activity } from './activity'
 import { createExpect } from './expect'
 import { parseKey, unknownPart } from './keys'
 import { by, describeTarget, expectsOne, toDescriptor, type Target } from './targets'
@@ -26,6 +27,9 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
   const js = <T>(expr: string): Promise<T> => wc().executeJavaScript(expr, true) as Promise<T>
   // Element queries run beside the page, where testing-library lives.
   const world = new World(getWc)
+  // What each action makes the page do, streamed under it in the log.
+  const activity = new Activity(emit, () => wc().getURL())
+  world.onPageEvent = (method, params) => activity.onEvent(method, params)
 
   // Electron accepts dialogs on its own, so an unanswered confirm() would
   // quietly say yes. Each one is answered here and shows up in the log.
@@ -45,10 +49,12 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
   async function prepare(): Promise<void> {
     nextAnswer = null
     await world.emulateFocus(true)
+    activity.start()
   }
 
   /** Hands focus back once the run ends; the editor is where it really is. */
   async function finish(): Promise<void> {
+    await activity.finish()
     await world.emulateFocus(false).catch(() => {})
   }
 
@@ -261,14 +267,26 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
       message: args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '),
     })
 
+  /** Wraps an action so the log shows it before it runs. */
+  const acted = <A extends unknown[], R>(
+    name: string,
+    fn: (...args: A) => Promise<R>,
+    describe: (...args: A) => string[]
+  ) =>
+    async (...args: A): Promise<R> => {
+      activity.act(`${name}(${describe(...args).join(', ')})`)
+      return fn(...args)
+    }
+  const str = (v: unknown): string => JSON.stringify(String(v))
+
   const api = {
-    goto,
-    reload,
-    click,
-    type,
-    fill,
-    select,
-    press,
+    goto: acted('goto', goto, (url) => [str(url)]),
+    reload: acted('reload', reload, () => []),
+    click: acted('click', click, (t) => [describeTarget(t)]),
+    type: acted('type', type, (t, v) => [describeTarget(t), str(v)]),
+    fill: acted('fill', fill, (t, v) => [describeTarget(t), str(v)]),
+    select: acted('select', select, (t, v) => [describeTarget(t), JSON.stringify(v)]),
+    press: acted('press', press, (k) => [str(k)]),
     waitFor,
     waitForNavigation,
     ...by,

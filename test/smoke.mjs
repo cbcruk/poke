@@ -20,6 +20,15 @@ const check = (name, actual, expected) => {
 }
 
 const server = http.createServer((req, res) => {
+  if (req.url.startsWith('/api/')) {
+    const status = req.url === '/api/save' ? 500 : 200
+    const delay = req.url === '/api/slow' ? 800 : req.url === '/api/last' ? 300 : 0
+    setTimeout(() => {
+      res.writeHead(status, { 'Content-Type': 'application/json' })
+      res.end('{}')
+    }, delay)
+    return
+  }
   const file = path.join(HERE, 'fixtures', path.basename(req.url.split('?')[0]))
   if (fs.existsSync(file)) {
     res.writeHead(200, { 'Content-Type': 'text/html' })
@@ -50,7 +59,13 @@ const [cmd, ...args] = process.platform === 'linux'
 const proc = spawn(cmd, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
 proc.stderr.on('data', (d) => { const s = String(d); if (/Error/.test(s)) process.stderr.write('[electron] ' + s.slice(0, 300)) })
 
-const bail = (msg) => { console.error('FAIL:', msg); shutdown(); process.exit(1) }
+let lastCode = ''
+const bail = (msg) => {
+  console.error('FAIL:', msg)
+  if (lastCode) console.error('last buffer:', lastCode.trim().split('\n').slice(0, 3).join(' | '))
+  shutdown()
+  process.exit(1)
+}
 function shutdown() {
   try { process.kill(-proc.pid, 'SIGKILL') } catch {}
   server.close()
@@ -109,6 +124,7 @@ check(
 )
 
 const runCode = async (code) => {
+  lastCode = code
   await panel.evaluate((c) => window.__pokeTest.setCode(c), code)
   await panel.evaluate(() => window.__pokeTest.run())
   for (let i = 0; i < 80; i++) {
@@ -439,6 +455,33 @@ check('단일 select 에 여러 값', /단일에 여러 개: select\("#room"\): 
 check('없는 옵션은 있는 옵션을 보여줌', /없는 옵션: select\("#room"\): no option "없음"; options are r1 "1진료실", r2 "2진료실", r3 "3진료실"/.test(logSelect), true)
 check('disabled select', /disabled: select\("#off"\): the select is disabled/.test(logSelect), true)
 check('select 가 아닌 대상', /select 아님: select\("h1"\): h1 is not a <select>/.test(logSelect), true)
+
+// ---- 2g6. 동작이 일으킨 요청과 콘솔 ----
+const logAct = await runCode(`
+await goto('${site}/activity.html')
+await click('#save')
+await sleep(300)
+await click('#slow')
+await click('#list')
+await sleep(1000)
+await click('#boom')
+await sleep(200)
+await click('#img')
+await sleep(300)
+await click('#last')
+`)
+const actLines = logAct.split('\n').map((l) => l.trim()).filter(Boolean)
+check('동작 줄에 번호', /^#2 click\("#save"\)$/m.test(actLines.join('\n')), true)
+check('동작 아래 요청', /#2 click\("#save"\)\n↳ POST \/api\/save 500 \(\d+ms\)/.test(actLines.join('\n')), true)
+check('console.error', /↳ console\.error: Validation failed/.test(logAct), true)
+check('console.log 은 숨김', /hidden-log/.test(logAct), false)
+check('Electron 자체 경고는 거름', /Electron Security Warning/.test(logAct), false)
+check('늦게 끝난 요청은 동작 번호를 붙임', /↳ #3 GET \/api\/slow 200 \(\d+ms\)/.test(logAct), true)
+check('제때 끝난 요청엔 번호 없음', /↳ GET \/api\/list 200/.test(logAct), true)
+check('잡히지 않은 예외', /↳ uncaught Error: boom/.test(logAct), true)
+check('실패한 리소스는 보임', /↳ GET \/missing\.png 404/.test(logAct), true)
+check('마지막 동작의 요청을 기다려 보여줌', /↳ GET \/api\/last 200/.test(logAct), true)
+check('그래도 done 이 마지막', /^done \(/.test(actLines[actLines.length - 1]), true)
 
 // ---- 2h. 응답하지 않는 페이지 ----
 // 메인 스레드가 막히면 CDP 평가가 돌아오지 않는다. 버퍼가 말없이 멈추면 안 된다.
