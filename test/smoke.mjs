@@ -30,10 +30,15 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r))
 const site = `http://127.0.0.1:${server.address().port}`
 
 const userData = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'poke-smoke-'))
-const proc = spawn('xvfb-run', ['-a', '-s', '-screen 0 1440x900x24',
+const electronArgs = [
   path.join(ROOT, 'node_modules/.bin/electron'), ROOT,
   `--remote-debugging-port=${PORT_CDP}`, '--no-sandbox', `--user-data-dir=${userData}`,
-], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
+]
+// Xvfb only exists on Linux; elsewhere the window simply opens on screen.
+const [cmd, ...args] = process.platform === 'linux'
+  ? ['xvfb-run', '-a', '-s', '-screen 0 1440x900x24', ...electronArgs]
+  : electronArgs
+const proc = spawn(cmd, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
 proc.stderr.on('data', (d) => { const s = String(d); if (/Error/.test(s)) process.stderr.write('[electron] ' + s.slice(0, 300)) })
 
 const bail = (msg) => { console.error('FAIL:', msg); shutdown(); process.exit(1) }
@@ -173,6 +178,18 @@ await goto('${site}/spa.html')
 log('바로 읽기:', await text('h1'))
 `)
 check('늦게 그려지는 요소를 기다림', /바로 읽기: 진료실 관리/.test(logSpa), true)
+
+// pushState 이동은 did-finish-load 를 내지 않는다. 그것만 세면 15초를 기다리다 실패한다.
+const logRouter = await runCode(`
+await goto('${site}/router.html')
+await click('#to-detail')
+await waitForNavigation(2000)
+log('라우터 이동:', await url(), await text('h1'))
+`)
+check('pushState 이동도 waitForNavigation 이 잡음', /라우터 이동: .*\?view=detail 상세/.test(logRouter), true)
+
+const logNoNav = await runCode(`await waitForNavigation(300)`)
+check('이동 없음은 어디 머물러 있는지 말함', /no page load or in-page navigation within 300ms .*still at .*\?view=detail/.test(logNoNav), true)
 
 const logMissing = await runCode(`await goto('${site}/page2.html')\nawait text('h9', 400)`)
 check('없는 요소는 이유를 말하며 실패', /text\("h9"\): no element matched within 400ms/.test(logMissing), true)

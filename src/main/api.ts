@@ -26,9 +26,19 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
   let navSeq = 0
   let actionSeq = 0
   const markAction = (): void => { actionSeq = navSeq }
-  const onDidFinishLoad = (): void => {
+  const navWaiters = new Set<() => void>()
+  const navigated = (): void => {
     navSeq += 1
+    for (const wake of navWaiters) wake()
+  }
+  const onDidFinishLoad = (): void => {
     world.invalidate() // navigation destroys the isolated world
+    navigated()
+  }
+  // A client-side router moves with pushState, which never fires
+  // did-finish-load. The document and its isolated world both survive.
+  const onDidNavigateInPage = (_e: unknown, _url: string, isMainFrame: boolean): void => {
+    if (isMainFrame) navigated()
   }
 
   const boxOf = (target: Target): Promise<{ x: number; y: number } | null> =>
@@ -109,11 +119,14 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         cleanup()
-        reject(new Error('waitForNavigation timeout'))
+        reject(new Error(
+          `waitForNavigation: no page load or in-page navigation within ${timeout}ms ` +
+            `since the last action (still at ${wc().getURL()})`
+        ))
       }, timeout)
       const done = (): void => { cleanup(); actionSeq = navSeq; setTimeout(resolve, 120) }
-      const cleanup = (): void => { clearTimeout(timer); wc().off('did-finish-load', done) }
-      wc().on('did-finish-load', done)
+      const cleanup = (): void => { clearTimeout(timer); navWaiters.delete(done) }
+      navWaiters.add(done)
     })
   }
 
@@ -198,7 +211,7 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     expect: createExpect(emit),
   }
 
-  return { api, onDidFinishLoad }
+  return { api, onDidFinishLoad, onDidNavigateInPage }
 }
 
 export type PokeApi = ReturnType<typeof createApi>['api']
