@@ -127,6 +127,9 @@ const api = {
     return el ? selectOptions(el, wanted) : null
   },
 
+  /** The element itself, for handing it to the main world by reference. */
+  element: (d: Descriptor): Element | null => all(d)[0] ?? null,
+
   /** Roles actually present, to make "nothing matched" actionable. */
   roles: (): string[] => {
     const seen = new Set<string>()
