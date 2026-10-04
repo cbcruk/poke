@@ -3,6 +3,7 @@
 // page context; the main process only passes descriptors in and gets plain
 // values back.
 import { queries, configure } from '@testing-library/dom'
+import { planFill, selectContents, valueOf, type FillPlan } from './fill'
 
 // Stock testing-library errors embed a prettyDOM dump of the whole document,
 // which runs to hundreds of characters and drowns the log panel. Keep the
@@ -103,6 +104,21 @@ const api = {
     const r = el.getBoundingClientRect()
     if (r.width === 0 && r.height === 0) return null
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  },
+
+  planFill: (d: Descriptor, text: string): FillPlan | null => {
+    const el = all(d)[0]
+    return el ? planFill(el, text) : null
+  },
+
+  selectContents: (d: Descriptor): void => {
+    const el = all(d)[0]
+    if (el) selectContents(el)
+  },
+
+  value: (d: Descriptor): string | null => {
+    const el = all(d)[0]
+    return el ? valueOf(el) : null
   },
 
   /** Roles actually present, to make "nothing matched" actionable. */

@@ -1,0 +1,15 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Input</title></head>
+<body>
+<input id="name" value="기존">
+<input id="short" maxlength="3">
+<input id="num" type="number">
+<input id="off" disabled>
+<input id="ro" readonly value="고정">
+<textarea id="memo"></textarea>
+<div id="rich" contenteditable="true"></div>
+<script>
+  window.__ev = []
+  document.addEventListener('input', (e) => __ev.push(e.target.id + ':' + e.inputType + ':' + e.isTrusted))
+  document.addEventListener('change', (e) => __ev.push(e.target.id + ':change:' + e.isTrusted))
+</script>
+</body></html>
