@@ -4,6 +4,7 @@
 // values back.
 import { queries, configure } from '@testing-library/dom'
 import { planFill, selectContents, valueOf, type FillPlan } from './fill'
+import { selectOptions, type SelectResult } from './select'
 
 // Stock testing-library errors embed a prettyDOM dump of the whole document,
 // which runs to hundreds of characters and drowns the log panel. Keep the
@@ -119,6 +120,11 @@ const api = {
   value: (d: Descriptor): string | null => {
     const el = all(d)[0]
     return el ? valueOf(el) : null
+  },
+
+  select: (d: Descriptor, wanted: string[]): SelectResult | null => {
+    const el = all(d)[0]
+    return el ? selectOptions(el, wanted) : null
   },
 
   /** Roles actually present, to make "nothing matched" actionable. */

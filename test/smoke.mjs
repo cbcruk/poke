@@ -404,6 +404,28 @@ check('disabled', /disabled: fill\("#off"\): the field is disabled/.test(logFill
 check('readonly', /readonly: fill\("#ro"\): the field is read-only/.test(logFill), true)
 check('type 은 그대로 덧붙임', /type 은 덧붙임: 가 나끝$/m.test(logFill), true)
 
+// ---- 2g5. select ----
+const logSelect = await runCode(`
+const why = async (fn) => { try { await fn(); return 'ok' } catch (e) { return e.message } }
+await goto('${site}/select.html')
+log('값으로:', JSON.stringify(await select('#room', 'r2')), await text('#out'))
+log('라벨로:', JSON.stringify(await select(byLabel('진료실'), '3진료실')), await text('#out'))
+log('여러 개:', JSON.stringify(await select('#multi', ['a', 'c'])))
+log('이벤트:', await evaluate('JSON.stringify(__ev)'))
+log('단일에 여러 개:', await why(() => select('#room', ['r1', 'r2'])))
+log('없는 옵션:', await why(() => select('#room', '없음')))
+log('disabled:', await why(() => select('#off', 'x')))
+log('select 아님:', await why(() => select('h1', 'x')))
+`)
+check('value 로 고르기', /값으로: \["r2"\] 2진료실/.test(logSelect), true)
+check('라벨로 고르기', /라벨로: \["r3"\] 3진료실/.test(logSelect), true)
+check('multiple', /여러 개: \["a","c"\]/.test(logSelect), true)
+check('input 과 change 를 냄', /"input:room","change:room"/.test(logSelect), true)
+check('단일 select 에 여러 값', /단일에 여러 개: select\("#room"\): a single select takes one value, got 2/.test(logSelect), true)
+check('없는 옵션은 있는 옵션을 보여줌', /없는 옵션: select\("#room"\): no option "없음"; options are r1 "1진료실", r2 "2진료실", r3 "3진료실"/.test(logSelect), true)
+check('disabled select', /disabled: select\("#off"\): the select is disabled/.test(logSelect), true)
+check('select 가 아닌 대상', /select 아님: select\("h1"\): h1 is not a <select>/.test(logSelect), true)
+
 // ---- 2h. 응답하지 않는 페이지 ----
 // 메인 스레드가 막히면 CDP 평가가 돌아오지 않는다. 버퍼가 말없이 멈추면 안 된다.
 const logBusy = await runCode(`

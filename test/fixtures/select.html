@@ -1,0 +1,21 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Select</title></head>
+<body>
+<h1 id="out">없음</h1>
+<label>진료실 <select id="room">
+  <option value="r1">1진료실</option>
+  <option value="r2">2진료실</option>
+  <option value="r3">3진료실</option>
+</select></label>
+<select id="multi" multiple>
+  <option value="a">가</option><option value="b">나</option><option value="c">다</option>
+</select>
+<select id="off" disabled><option value="x">x</option></select>
+<script>
+  window.__ev = []
+  document.addEventListener('input', (e) => __ev.push('input:' + e.target.id))
+  document.addEventListener('change', (e) => {
+    __ev.push('change:' + e.target.id)
+    if (e.target.id === 'room') document.getElementById('out').textContent = e.target.selectedOptions[0].text
+  })
+</script>
+</body></html>
