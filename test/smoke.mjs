@@ -24,7 +24,7 @@ const check = (name, actual, expected) => {
 // development builds, which is what a dev server would serve.
 const built = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'poke-built-'))
 await build({
-  entryPoints: ['react-app.jsx', 'vue-app.js'].map((f) => path.join(HERE, 'fixtures/src', f)),
+  entryPoints: ['react-app.jsx', 'vue-app.js', 'ssr-client.jsx'].map((f) => path.join(HERE, 'fixtures/src', f)),
   bundle: true,
   outdir: built,
   jsx: 'automatic',
@@ -37,7 +37,28 @@ await build({
   logLevel: 'error',
 })
 
+await build({
+  entryPoints: [path.join(HERE, 'fixtures/src/ssr-server.jsx')],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: path.join(built, 'ssr-server.mjs'),
+  jsx: 'automatic',
+  define: { 'process.env.NODE_ENV': '"development"' },
+  external: ['react', 'react-dom'],
+  logLevel: 'error',
+})
+// Bundled into a temp dir, so react has to be resolved from here.
+fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(built, 'node_modules'))
+const { render: renderSsr } = await import(path.join(built, 'ssr-server.mjs'))
+
 const server = http.createServer((req, res) => {
+  if (req.url.startsWith('/ssr.html')) {
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>SSR</title></head>
+<body><div id="root">${renderSsr()}</div><script src="/built/ssr-client.js"></script></body></html>`)
+    return
+  }
   if (req.url.startsWith('/built/')) {
     res.writeHead(200, { 'Content-Type': 'text/javascript' })
     res.end(fs.readFileSync(path.join(built, path.basename(req.url))))
@@ -581,6 +602,28 @@ check('computed 는 읽기 전용', /computed: setState\("#counter"\): "double" 
 check('없는 키는 있는 키를 보여줌', /없는 키: setState\("#counter"\): no state "nope"; it has count, double/.test(logVue), true)
 check('Vue 전역 훅 없음', /전역: undefined/.test(logVue), true)
 check('프레임워크 없는 페이지', /프레임워크 없음: component\("h1"\): no React or Vue component owns this element/.test(logVue), true)
+
+// ---- 2g9. hydration 전 입력 ----
+// hydrateRoot 가 불리기 전의 클릭은 리스너가 없어 사라지고, 나중에 재생되지도 않는다.
+const logSsr = await runCode(`
+await goto('${site}/ssr.html?delay=0')
+await click('#inc')
+log('바로 hydrate:', await text('#inc'))
+await goto('${site}/ssr.html?delay=1500')
+await click('#inc')
+log('늦은 hydrate:', await text('#inc'))
+await goto('${site}/ssr.html?delay=-1')
+await click('#inc')
+await goto('${site}/page1.html')
+const t = Date.now()
+await click('#probe')
+log('React 아닌 페이지는 기다리지 않음:', String(Date.now() - t < 500))
+`)
+check('hydrate 된 페이지 클릭', /바로 hydrate: count: 1/.test(logSsr), true)
+check('hydrate 를 기다렸다 클릭', /늦은 hydrate: count: 1/.test(logSsr), true)
+check('기다렸다고 말함', /· waited \d+ms for React to hydrate/.test(logSsr), true)
+check('끝내 hydrate 안 되면 말하고 진행', /· click: the page looks server-rendered by React but did not hydrate within 5000ms; going ahead/.test(logSsr), true)
+check('React 아닌 페이지는 바로', /React 아닌 페이지는 기다리지 않음: true/.test(logSsr), true)
 
 // ---- 2h. 응답하지 않는 페이지 ----
 // 메인 스레드가 막히면 CDP 평가가 돌아오지 않는다. 버퍼가 말없이 멈추면 안 된다.

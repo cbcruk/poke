@@ -2,6 +2,7 @@ import type { WebContents } from 'electron'
 import { inspect, isDeepStrictEqual } from 'node:util'
 import { Activity } from './activity'
 import { componentOnElement, type ComponentInfo, type ComponentReply } from './component-page'
+import { hydrationOnPage, type HydrationState } from './hydration-page'
 import { createExpect } from './expect'
 import { parseKey, unknownPart } from './keys'
 import { by, describeTarget, expectsOne, toDescriptor, type Target } from './targets'
@@ -123,8 +124,29 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     }
   }
 
+  /**
+   * Holds input back while React's server HTML is on screen but no root has
+   * been hydrated: a click then has no listener and is lost for good, not
+   * replayed. Pages that do not look server-rendered by React pass at once.
+   */
+  async function hydrated(method: string, timeout = 5000): Promise<void> {
+    const started = Date.now()
+    for (;;) {
+      const s = await world.onElement<HydrationState>({ kind: 'css', literal: 'html' }, hydrationOnPage, [])
+      if (!s || !s.ssr || s.hydrated) break
+      if (Date.now() - started > timeout) {
+        emit({ kind: 'dim', message: `  · ${method}: the page looks server-rendered by React but did not hydrate within ${timeout}ms; going ahead` })
+        return
+      }
+      await sleep(100)
+    }
+    const waited = Date.now() - started
+    if (waited >= 150) emit({ kind: 'dim', message: `  · waited ${waited}ms for React to hydrate` })
+  }
+
   async function click(target: Target): Promise<void> {
     await require(target, 'click', 5000)
+    await hydrated('click')
     markAction()
     const b = await boxOf(target)
     if (!b) throw new Error(`click(${describeTarget(target)}): matched but not visible`)
@@ -207,6 +229,7 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
   async function select(target: Target, value: string | string[]): Promise<string[]> {
     const wanted = Array.isArray(value) ? value : [value]
     await require(target, 'select', 5000)
+    await hydrated('select')
     markAction()
     const r = await world.query<SelectResult | null>('select', toDescriptor(target), wanted)
     if (!r) throw new Error(`select(${describeTarget(target)}): the element went away`)
